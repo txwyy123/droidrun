@@ -165,10 +165,25 @@ class AndroidStateProvider(StateProvider):
         logger.debug("Restarting Portal accessibility service...")
         await device.shell("settings put secure accessibility_enabled 0")
         await asyncio.sleep(0.5)
+        existing_services = await device.shell(
+            "settings get secure enabled_accessibility_services"
+        )
+        service_parts = []
+        if existing_services:
+            service_parts.extend(
+                part.strip()
+                for part in existing_services.split(":")
+                if part.strip() and part.strip().lower() != "null"
+            )
+        if A11Y_SERVICE_NAME not in service_parts:
+            service_parts.append(A11Y_SERVICE_NAME)
+        merged_services = ":".join(service_parts) or A11Y_SERVICE_NAME
         await device.shell(
-            f"settings put secure enabled_accessibility_services {A11Y_SERVICE_NAME}"
+            f"settings put secure enabled_accessibility_services '{merged_services}'"
         )
         await device.shell("settings put secure accessibility_enabled 1")
+        await asyncio.sleep(0.5)
+        await device.shell("input keyevent KEYCODE_HOME")
 
         # 2. Restart TCP socket server if it was in use
         portal = self.driver.portal

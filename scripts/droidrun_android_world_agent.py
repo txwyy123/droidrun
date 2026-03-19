@@ -117,6 +117,11 @@ def _restore_accessibility(device: Optional[str]) -> bool:
     return restored
 
 
+def _stabilize_foreground_window(device: Optional[str], wait_sec: float = 2.0) -> None:
+    _adb("shell", "input keyevent KEYCODE_HOME", device=device, timeout=15)
+    time.sleep(wait_sec)
+
+
 def _import_android_world():
     try:
         base_agent = importlib.import_module("android_world.agents.base_agent")
@@ -564,6 +569,7 @@ def _build_droidrun_android_world_agent(base_agent):
         def step(self, goal: str):
             self._counter += 1
             print(f"\n-> DroidRun executing: {goal[:120]}...")
+            _stabilize_foreground_window(self._options.device_serial)
             start = time.time()
             result = asyncio.run(_run_droidrun_goal(goal, self._options))
             elapsed = time.time() - start
@@ -587,11 +593,10 @@ def _build_droidrun_android_world_agent(base_agent):
 
         def reset(self, start_on_home_screen: bool = False) -> None:
             self._counter = 0
-            if start_on_home_screen:
-                _adb("shell", "input keyevent KEYCODE_HOME", device=self._options.device_serial)
-                time.sleep(1)
             _sync_device_time(self._options.device_serial)
             _restore_accessibility(self._options.device_serial)
+            if start_on_home_screen:
+                _stabilize_foreground_window(self._options.device_serial, wait_sec=1.0)
 
     return DroidRunAndroidWorldAgent
 
@@ -680,6 +685,7 @@ def main() -> int:
     env = _load_env(env_launcher, args.device)
     _sync_device_time(args.device)
     _restore_accessibility(args.device)
+    _stabilize_foreground_window(args.device, wait_sec=1.5)
 
     agent = DroidRunAndroidWorldAgent(env=env, options=options)
     task_registry = _create_suite(
