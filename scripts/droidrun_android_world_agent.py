@@ -22,14 +22,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+PORTAL_PACKAGE = "com.droidrun.portal"
 ANDROID_WORLD_A11Y_COMPONENT = (
     "com.google.androidenv.accessibilityforwarder/"
     "com.google.androidenv.accessibilityforwarder.AccessibilityForwarder"
 )
 DROIDRUN_PORTAL_A11Y_COMPONENT = (
-    "com.droidrun.portal/com.droidrun.portal.service.DroidrunAccessibilityService"
+    f"{PORTAL_PACKAGE}/com.droidrun.portal.service.DroidrunAccessibilityService"
 )
-DEFAULT_DROIDRUN_REPO = Path("/Users/wengu/StudioProjects/droidrun")
+DEFAULT_DROIDRUN_REPO = Path(__file__).resolve().parents[1]
 
 
 def _adb(*args: str, device: Optional[str], timeout: int = 30) -> str:
@@ -56,6 +57,7 @@ def _enabled_a11y_services(device: Optional[str]) -> str:
 
 
 def _sync_device_time(device: Optional[str]) -> bool:
+    """Best-effort sync of emulator wall clock to current UTC time."""
     timestamp = datetime.now(timezone.utc).strftime("%m%d%H%M%Y.%S")
     subprocess.run(
         ["adb"] + (["-s", device] if device else []) + ["root"],
@@ -71,26 +73,47 @@ def _sync_device_time(device: Optional[str]) -> bool:
     return restored
 
 
+def _wait_for_accessibility(device: Optional[str], timeout_sec: int = 20) -> bool:
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        dumpsys = _adb("shell", "dumpsys accessibility", device=device, timeout=15)
+        if "com.droidrun.portal.service.DroidrunAccessibilityService" in dumpsys:
+            return True
+        time.sleep(1)
+    return False
+
+
 def _restore_accessibility(device: Optional[str]) -> bool:
-    services = (
-        f"{ANDROID_WORLD_A11Y_COMPONENT}:{DROIDRUN_PORTAL_A11Y_COMPONENT}"
+    services = f"{ANDROID_WORLD_A11Y_COMPONENT}:{DROIDRUN_PORTAL_A11Y_COMPONENT}"
+    _adb(
+        "shell",
+        f"cmd appops set {PORTAL_PACKAGE} ACCESS_RESTRICTED_SETTINGS allow",
+        device=device,
+        timeout=15,
     )
     _adb(
         "shell",
         f"settings put secure enabled_accessibility_services '{services}'",
         device=device,
+        timeout=15,
     )
     _adb(
         "shell",
         "settings put secure accessibility_enabled 1",
         device=device,
+        timeout=15,
     )
-    enabled = _enabled_a11y_services(device)
-    restored = (
-        ANDROID_WORLD_A11Y_COMPONENT in enabled
-        and DROIDRUN_PORTAL_A11Y_COMPONENT in enabled
+    _adb(
+        "shell",
+        f"monkey -p {PORTAL_PACKAGE} -c android.intent.category.LAUNCHER 1",
+        device=device,
+        timeout=20,
     )
-    print(f"    Accessibility restore: restored={restored} enabled={enabled}")
+    restored = _wait_for_accessibility(device)
+    print(
+        f"    Accessibility restore: restored={restored} "
+        f"enabled={_enabled_a11y_services(device)}"
+    )
     return restored
 
 
